@@ -45,6 +45,10 @@ del df_turnover, df_stores
 df.head(2)
 ```
 
+```python
+df.isna().sum()
+```
+
 ## Questions
 
 
@@ -117,10 +121,10 @@ middle_lon = tmp['but_longitude'].median()
 m = folium.Map(location=[middle_lat, middle_lon], zoom_start=6)
 
 # mark each station as a point
-if False:
+if True:
     for index, row in tmp.iterrows():
         folium.CircleMarker([row['but_latitude'], row['but_longitude']],
-                            radius=15,
+                            radius=5,
                             popup= row['but_num_business_unit'],
                             fill_color="#3db7e4", # divvy color
                            ).add_to(m)
@@ -130,7 +134,7 @@ if False:
 # convert to (n, 2) nd-array format for heatmap
 tmp["heat_map_weights_col"] = \
                     tmp["turnover"] / tmp["turnover"].sum()
-stores = tmp[['but_latitude', 'but_longitude','heat_map_weights_col']].values
+stores = tmp[['but_latitude', 'but_longitude','turnover']].values
 
 # plot heatmap
 m.add_child(plugins.HeatMap(stores, radius=20))
@@ -160,4 +164,93 @@ df \
     .sort_values('turnover') \
     .plot("but_num_business_unit", kind='barh', ax=ax)
 plt.grid(True)
+```
+
+## zone / regions
+
+```python
+df \
+.groupby('zod_idr_zone_dgr', as_index=False) \
+.agg({'turnover': "mean"}) \
+.plot('zod_idr_zone_dgr', kind='barh')
+```
+
+```python
+df.dpt_num_department.unique().shape
+```
+
+```python
+df \
+.groupby('but_region_idr_region', as_index=False) \
+.agg({'turnover': "mean"}) \
+.plot('but_region_idr_region', kind='barh')
+```
+
+```python
+df \
+.query("dpt_num_department == 88 and but_region_idr_region == 75") \
+.groupby('weekofyear', as_index=False) \
+.agg({'turnover': sum}) \
+.sort_values('turnover', ascending=False).sort_values('weekofyear') \
+.plot('weekofyear', 'turnover')
+
+df \
+.query("dpt_num_department == 88 and but_region_idr_region == 2") \
+.groupby('weekofyear', as_index=False) \
+.agg({'turnover': sum}) \
+.sort_values('turnover', ascending=False).sort_values('weekofyear') \
+.plot('weekofyear', 'turnover')
+```
+
+```python
+df \
+.query("dpt_num_department == 117 and zod_idr_zone_dgr == 6") \
+.groupby('weekofyear', as_index=False) \
+.agg({'turnover': sum}) \
+.sort_values('turnover', ascending=False).sort_values('weekofyear') \
+.plot('weekofyear', 'turnover')
+
+df \
+.query("dpt_num_department == 117 and zod_idr_zone_dgr == 1") \
+.groupby('weekofyear', as_index=False) \
+.agg({'turnover': sum}) \
+.sort_values('turnover', ascending=False).sort_values('weekofyear') \
+.plot('weekofyear', 'turnover')
+```
+
+```python
+
+```
+
+## Clean data
+
+```python
+fig, ax = plt.subplots(1,1, figsize=(30,60))
+df \
+    .query(f"dpt_num_department == {88} and year == {2013} and weekofyear == {44}") \
+    .groupby(['but_num_business_unit'], as_index=False) \
+    .agg({'turnover': sum})\
+    .sort_values('turnover') \
+    .plot("but_num_business_unit", kind='barh', ax=ax)
+plt.grid(True)
+```
+
+## Check test data
+
+```python
+df_test = pd.read_csv('../data/raw/test.csv')
+```
+
+```python
+df_test.day_id.unique()
+```
+
+```python
+# les magasins sont connus dans la base de test
+set(df_test.but_num_business_unit.unique()) - set(df.but_num_business_unit.unique())
+```
+
+```python
+# les départements sont connus dans la base de test
+set(df_test.dpt_num_department.unique()) - set(df.dpt_num_department.unique())
 ```
