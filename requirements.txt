@@ -2,4 +2,6 @@ flake8==3.8.4
 jupyter==1.0.0
 jupytext==1.10.2
 matplotlib==3.4.1
+sklearn=='0.24.1'
+plotly=='4.14.3'
 pandas==1.2.4
