@@ -10,7 +10,7 @@ pages:
   stage: deploy
   script:
     - make doc
-    - mv notebook/documentation/ public
+    - mv ndoc/build/html/* public
   artifacts:
       paths:
       - public
