@@ -1,32 +1,21 @@
----
-jupyter:
-  jupytext:
-    text_representation:
-      extension: .md
-      format_name: markdown
-      format_version: '1.3'
-      jupytext_version: 1.10.2
-  kernelspec:
-    display_name: decathlon-env
-    language: python
-    name: decathlon-env
----
-
-```python
+from __future__ import annotations
+import logging
 import numpy as np
 import pandas as pd
 from typing import Optional, Any, Tuple, Union
+from mlflow.pyfunc import PythonModel
 from sklearn.base import clone
 from sklearn.base import BaseEstimator, RegressorMixin
-```
+logger = logging.getLogger(__name__)
 
-```python
-class MultiModel(BaseEstimator, RegressorMixin):
+
+class MultiModel(PythonModel, BaseEstimator, RegressorMixin):
     """
     Wrapper of multiple clones of a given estimator. Each clone differs only by:
         - the boostrap sample it is trained on
         - its random state (if any).
     Inherits BaseEstimator and RegressorMixin so as to fit into
+    Inherits from PythonModel so as to be saved with MLflow.
     sklearn pipelines and sklearn clone method.
 
     Attributes
@@ -52,7 +41,7 @@ class MultiModel(BaseEstimator, RegressorMixin):
         """
         self.n_models = n_models
         self.estimator = estimator
-        print(f'Instantiate {n_models} models of type:\n{estimator}')
+        logger.info(f'Instantiate {n_models} models of type:\n{estimator}')
 
     def _bootstrap(
         self,
@@ -84,7 +73,7 @@ class MultiModel(BaseEstimator, RegressorMixin):
         else:
             return X_bootstrap
 
-    def fit(self, X: pd.DataFrame, y: Optional[pd.Series] = None):
+    def fit(self, X: pd.DataFrame, y: Optional[pd.Series] = None) -> MultiModel:
         """
         Fit all clones and rearrange them into a list.
         The initial estimator is fit apart.
@@ -111,7 +100,7 @@ class MultiModel(BaseEstimator, RegressorMixin):
             X_bootstrap, y_bootstrap = self._bootstrap(X, y, random_state=random_state)
             e.fit(X_bootstrap, y_bootstrap)
             self.estimators.append(e)
-            print(f'fit: X of shape {X.shape} on y - seed: {random_state}')
+            logger.info(f'fit: X of shape {X.shape} on y - seed: {random_state}')
         return self
 
     def predict(self, context: Any, X: pd.DataFrame) -> pd.DataFrame:
@@ -139,80 +128,5 @@ class MultiModel(BaseEstimator, RegressorMixin):
             columns=['y_pred_{}'.format(i) for i in range(self.n_models)]
         )
         preds['y_pred_simple'] = self.single_estimator.predict(X)
-        print(f'predict: X of shape {X.shape}')
+        logger.info(f'predict: X of shape {X.shape}')
         return preds
-```
-
-```python
-def compute_maes(y_true: pd.Series, y_pred: pd.DataFrame)b-> List[float]:
-    """
-    Return mean absolute errors of multi model given its predictions.
-
-    Parameters
-    ----------
-    y_pred : pd.DataFrame
-        Dataframe containing predicted labels (columns 'y_pred*').
-
-    Returns
-    -------
-    list
-        List of MAEs, one entry per model perturbation.
-    """
-    columns = [col for col in y_pred.columns if col.startswith('y_pred')]
-    return [mean_absolute_error(y_true, y_pred[col]) for col in columns]
-```
-
-```python
-def compute_mapes(y_true: pd.Series, y_pred: pd.DataFrame) -> List[float]:
-    """
-    Return mean absolute errors of multi model given its predictions.
-
-    Parameters
-    ----------
-    y_pred : pd.DataFrame
-        Dataframe containing predicted labels (columns 'y_pred*').
-
-    Returns
-    -------
-    list
-        List of MAEs, one entry per model perturbation.
-    """
-    columns = [col for col in y_pred.columns if col.startswith('y_pred')]
-    return [mean_absolute_percentage_error(y_true, y_pred[col]) for col in columns]
-```
-
-```python
-maes = []
-mapes = []
-preds = pd.DataFrame()
-n_fold=3
-cv = TimeSeriesSplit(n_fold, test_size=10136)
-for fold, (train_index, test_index) in enumerate(cv.split(x_train, y_train)):
-    x_fold_train, x_fold_test = x_train.iloc[train_index], x_train.iloc[test_index]
-    y_fold_train, y_fold_test = y_train.iloc[train_index], y_train.iloc[test_index]
-    model_fold = clone(model)
-    model_fold.fit(x_fold_train, y_fold_train)
-    try:
-        preds_fold_test = model_fold.predict(None, x_fold_test)
-    except (TypeError, ValueError):
-        preds_fold_test = pd.DataFrame(
-            model_fold.predict(x_fold_test),
-            index=x_fold_test.index,
-            columns=['ay_pred_simple']
-        )
-    mae_fold = compute_maes(y_fold_test, preds_fold_test)
-    mape_fold = compute_mapes(y_fold_test, preds_fold_test)
-    maes.append(mae_fold)
-    mapes.append(mape_fold)
-    preds = pd.concat([preds, preds_fold_test], sort=True)
-    print(f'Fold {fold} -')
-    print(f'train shape: [{x_fold_train.shape, x_fold_train.index.min(), x_fold_train.index.max()} - test shape: {x_fold_test.shape, x_fold_test.index.min(), x_fold_test.index.max()}]')
-```
-
-```python
-compute_maes(y_fold_test, preds_fold_test)
-```
-
-```python
-compute_mapes(y_fold_test, preds_fold_test)
-```
