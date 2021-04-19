@@ -13,6 +13,7 @@ jupyter:
 ---
 
 # 01 - Preliminary questions & data exploration
+    Author: corentinv
 
 ```python
 import sys

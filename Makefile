@@ -28,7 +28,7 @@ clean-doc:
 	rm -r $(DOCUMENTATION_OUTPUT)
 
 pipeline-validate:
-	python $(SOURCE_DIR)/application/train.py
+	python $(SOURCE_DIR)/application/validate.py
 
 pipeline-predict:
 	python $(SOURCE_DIR)/application/predict.py

@@ -33,7 +33,7 @@ import folium
 from forecast.application import etl
 from forecast.domain import feature_engineering
 from forecast.domain.transform import transform
-from forecast.domain.forecast  import simple_training, cross_validate
+from forecast.domain.forecast  import simple_training, cross_validate, compute_mae_mape_per_points
 from forecast.infrastructure.extract import extract_test_set_csv, extract_stores_csv
 import forecast.settings as settings
 
@@ -73,9 +73,15 @@ df \
     .groupby(["weekofyear",'year'], as_index=False) \
     .agg({'turnover': sum})\
     .pivot(index='weekofyear', columns='year', values='turnover') \
-    .plot(figsize=(10,7))
+    .plot(
+            figsize=(12,5), 
+            xlabel='weekofyear', 
+            ylabel='Turnover', 
+            title=f'Evolution of turnover for department {88} by year'
+)
 plt.grid(True)
-plt.title(f'Dep {88}')
+#plt.xlabel('Turnover')
+#plt.title(f'Evolution of turnover for department {88} by year')
 ```
 
 # Feature engineering
@@ -99,9 +105,9 @@ features = ['weekofyear_cos_1', 'weekofyear_sin_1', 'x', 'y', 'z', 'dpt_num_depa
 df_feat[features].head(2)
 ```
 
-# Simple model - simple learning
+# Simple model - Simple learning
     Model: RandomForestRegressor
-    Learning method: split train/valid set (valid set corresponding to the 8 more recent dates)
+    Learning method: split train/valid set (validation set corresponding to the 8 more recent dates)
     Metrics: MAE, MAPE/100
 
 ```python
@@ -115,8 +121,9 @@ x_train, x_test, model = simple_training(df_feat, model, features)
 ```python
 # Plot results on test set
 fig, ax = plt.subplots(figsize=(500,10))
-ax.plot(range(x_test.shape[0]), x_test[["turnover","y_pred_simple"]]) #turnover_simple_prediction
+ax.plot(range(x_test.shape[0]), x_test[["turnover","y_pred_simple"]])
 plt.grid(True)
+plt.title('Evolution of turnover on validation set')
 ```
 
 # Simple model - TimeSerieSplit learning
@@ -147,25 +154,32 @@ n_estimators = 20
 max_depth = 30
 n_models = 10
 
-model = MultiModel(RandomForestRegressor(n_estimators=n_estimators, max_depth = max_depth), n_models=n_models)
+model = MultiModel(
+        RandomForestRegressor(n_estimators=n_estimators, max_depth = max_depth), 
+        n_models=n_models
+)
 ```
 
 ```python
-x_train, x_test, model = cross_validate(df_feat, model=model, features=features, n_fold = n_fold)
+x_train, x_test, model = cross_validate(
+                                df_feat, 
+                                model=model, 
+                                features=features, 
+                                n_fold = n_fold
+)
+# x_train, x_test, model = simple_training(df_feat, model, features)
 ```
 
 ```python
-#x_train, x_test, model = simple_training(df_feat, model, features)
-```
+preds = pd.DataFrame(
+        { 
+            'y_pred_simple': x_test['y_pred_simple'],
+            'y_pred_min': x_test[[f'y_pred_{i}' for i in range(1,n_models)]].min(axis=1),
+            'y_pred_max': x_test[[f'y_pred_{i}' for i in range(1,n_models)]].max(axis=1),
+            'turnover': x_test['turnover']
+        }
+)
 
-```python
-preds = pd.DataFrame({ 'y_pred_simple': x_test['y_pred_simple'],
- 'y_pred_min': x_test[[f'y_pred_{i}' for i in range(1,10)]].min(axis=1),
-    'y_pred_max': x_test[[f'y_pred_{i}' for i in range(1,10)]].max(axis=1),
-    'turnover': x_test['turnover']})
-```
-
-```python
 # Results on test set
 tmp_plot = preds[:50]
 fig, ax = plt.subplots(figsize=(30,10))
@@ -177,36 +191,26 @@ plt.legend()
 ```
 
 ```python
-res = pd.concat([df.set_index('day_id')[['but_num_business_unit','dpt_num_department','turnover']], model.predict(None, df_feat.set_index('day_id')[features])],axis=1)
-```
-
-```python
 preds = model.predict(None, df_feat.set_index('day_id')[features])
+
+preds = pd.DataFrame(
+    { 
+        'y_pred_simple': preds['y_pred_simple'],
+        'y_pred_min': preds[[f'y_pred_{i}' for i in range(1,10)]].min(axis=1),
+        'y_pred_max': preds[[f'y_pred_{i}' for i in range(1,10)]].max(axis=1)
+    }
+)
+
+final_output = pd.concat(
+    [
+        df.set_index('day_id')[['but_num_business_unit','dpt_num_department','turnover']], 
+        preds
+    ],axis=1)
 ```
 
 ```python
-preds = pd.DataFrame({ 'y_pred_simple': preds['y_pred_simple'],
- 'y_pred_min': preds[[f'y_pred_{i}' for i in range(1,10)]].min(axis=1),
-    'y_pred_max': preds[[f'y_pred_{i}' for i in range(1,10)]].max(axis=1)})
-```
-
-```python
-final_output = pd.concat([df.set_index('day_id')[['but_num_business_unit','dpt_num_department','turnover']], preds],axis=1)
-```
-
-```python
-#final_output.to_csv(settings.DATA_DIR_OUTPUT + '/train_predictions.csv')
-```
-
-```python
-# Results on test set
-tmp_plot = final_output[:50]
-fig, ax = plt.subplots(figsize=(30,10))
-ax.plot(range(tmp_plot.shape[0]), tmp_plot["turnover"], label ='turnover' )
-ax.plot(range(tmp_plot.shape[0]), tmp_plot["y_pred_simple"], label='simple_pred')
-ax.fill_between(range(tmp_plot.shape[0]), tmp_plot["y_pred_min"], tmp_plot["y_pred_max"], alpha=0.2)
-plt.grid(True)
-plt.legend()
+compute_mae_mape_per_points(final_output) \
+    .to_csv(settings.DATA_DIR_OUTPUT + '/train_predictions_v3.csv')
 ```
 
 # Test set - predictions
@@ -249,5 +253,5 @@ plt.legend()
 ```
 
 ```python
-#res.to_csv(settings.DATA_DIR_OUTPUT+'/test_predictions.csv')
+final_output.to_csv(settings.DATA_DIR_OUTPUT+'/test_predictions_v2.csv')
 ```
