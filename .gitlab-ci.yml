@@ -10,8 +10,5 @@ pages:
   stage: deploy
   script:
     - make doc
-  artifacts:
-      paths:
-      - public
   only:
     - master
