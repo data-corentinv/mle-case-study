@@ -8,14 +8,20 @@ import matplotlib.pyplot as plt
 
 from forecast.domain.multimodel import MultiModel
 from forecast.domain import transform, feature_engineering
-from forecast.domain.forecast import simple_training
+from forecast.domain.forecast import simple_training, compute_mae_mape_per_points
 from forecast.infrastructure import extract_turnover_history_csv, extract_stores_csv, extract_test_set_csv
-from forecast.settings import DATA_DIR_RAW
+from forecast.application import etl
+import forecast.settings as settings
 
 import mlflow
 from mlflow.utils import mlflow_tags
+from forecast.application.mlflow_utils import mlflow_log_pandas
 
+import yaml
 import logging
+import logging.config
+with open(settings.LOGGING_CONFIGURATION_FILE, 'r') as f:
+    logging.config.dictConfig(yaml.safe_load(f.read()))
 logger = logging.getLogger(__name__)
 
 import pdb
@@ -28,63 +34,81 @@ FEATURES = ['weekofyear_cos_1', 'weekofyear_sin_1', 'x', 'y', 'z', 'dpt_num_depa
 
 LIST_FEATURES_TO_DUMMY = ['dpt_num_department',"zod_idr_zone_dgr"]
 
-def etl(raw_data_dir: str, preprocessed_data_dir: bool = None) -> pd.DataFrame:
-    """ Extract transform and load data. Extract historical (train.csv, test.csv)
-    and stores informations (bu_feat.csv)
-    TODO: Adapt function for testset
-
-    Parameters
-    ----------
-    raw_data_dir : str
-        Path of data directory containing train.csv, test.csv, bu_feat.csv
-    preprocessed_data_dir : str (default: None)
-        Path of data for saving results of etl (default value is None, no data saved)
-
-    Returns
-    -------
-    pd.DataFrame
-        Dataframe cleaned
-    """
-    # Extract
-    df_turnover = extract_turnover_history_csv(raw_data_dir)
-    df_stores = extract_stores_csv(raw_data_dir)
-
-    # Transform
-    df = transform(df_turnover, df_stores)
-
-    # Load <-> Save data
-    if preprocessed_data_dir:
-        logger.info('TODO: Data would be saved (not implemented)')
-
-    return df
-
-def train_multimodel(df: pd.DataFrame):
+def train_simple_model(df: pd.DataFrame,
+                        list_features_to_dummy: list,
+                        features: list,     
+                        n_estimators: int = 20,
+                        max_depth: int = 30
+                        ):
     """ Train simple model
     """
+    logger.info('Simple model training in progress')
+
+    mlflow_client = mlflow.tracking.MlflowClient()
+
+    with mlflow.start_run(run_name='train_simple_model') as run:
+        logger.info(f"Start mlflow run - train_simple_model - id = {run.info.run_id}")
+        mlflow.set_tag('entry_point', 'train_simple_model')
+        
+        df_feat = feature_engineering(df, list_features_to_dummy)
+        
+        mlflow.log_params(
+            {
+                'n_estimators': n_estimators,
+                'max_depth': max_depth,
+                "dummy_features": list_features_to_dummy,
+                "nb_features": len(features),
+            }
+        )
+        git_commit = run.data.tags.get(mlflow_tags.MLFLOW_GIT_COMMIT)
+    
+        model = RandomForestRegressor(n_estimators=n_estimators, max_depth = max_depth)
+        df_feat = df_feat.set_index('day_id')
+        logger.info('learning in progress')
+        model.fit(df_feat[features], df_feat['turnover'])
+        logger.info('learning done')
+
+        mlflow.sklearn.log_model(
+            sk_model=model,
+            artifact_path='simple_model',
+        )
+
+        logger.info(f'mlflow.pyfunc.log_model:\n{model}')
+            
+    return model #TODO use get_run mlflow
+
+def train_multi_model(df: pd.DataFrame, 
+                        list_features_to_dummy: list,
+                        features: list,     
+                        n_estimators: int = 20,
+                        max_depth: int = 30, 
+                        n_models: int=10
+                        ):
+    """ TODO Train mutli model
+    """
+    logger.info('Multi model training in progress')
     mlflow_client = mlflow.tracking.MlflowClient()
 
     with mlflow.start_run(run_name='train_multi_model') as run:
         logger.info(f"Start mlflow run - train_multi_model - id = {run.info.run_id}")
         mlflow.set_tag('entry_point', 'train_multi_model')
         
-        df_feat = feature_engineering(df, LIST_FEATURES_TO_DUMMY)
+        df_feat = feature_engineering(df, list_features_to_dummy)
         
         mlflow.log_params(
             {
-                'n_estimators': 20,
-                'max_depath': 30,
-                "dummy_features": LIST_FEATURES_TO_DUMMY,
-                "nb_features": len(FEATURES),
-                'n_models':10
+                'n_estimators': n_estimators,
+                'max_depth': max_depth,
+                "dummy_features": list_features_to_dummy,
+                "nb_features": len(features),
+                'n_models':n_models
             }
         )
         git_commit = run.data.tags.get(mlflow_tags.MLFLOW_GIT_COMMIT)
     
-        model = MultiModel(RandomForestRegressor(n_estimators=20, max_depth = 30), n_models=10)        
-        x_train, _, model = simple_training(df_feat, model, FEATURES, nb_week_prediction=1)
-        
-        mlflow.log_metric(key="mae_train_set", value=round(x_train.MAE.mean(),1))
-        mlflow.log_metric(key="mape_train_set", value=round(x_train.MAPE.mean(),1)*100)
+        model = MultiModel(RandomForestRegressor(n_estimators=n_estimators, max_depth = max_depth), n_models=n_models)     
+        df_feat = df_feat.set_index('day_id')   
+        model.fit(df_feat[features], df_feat['turnover'])
 
         mlflow.pyfunc.log_model(
             python_model=model,
@@ -104,49 +128,16 @@ def train_multimodel(df: pd.DataFrame):
         )
        
         logger.info(f'mlflow.pyfunc.log_model:\n{model}')
+    logger.info(f'process validation multi model done')
             
-    return model #TODO use get_run mlflow
-
-def train_simple_model(df: pd.DataFrame):
-    """ Train simple model
-    """
-    mlflow_client = mlflow.tracking.MlflowClient()
-
-    with mlflow.start_run(run_name='train_simple_model') as run:
-        logger.info(f"Start mlflow run - train_simple_model - id = {run.info.run_id}")
-        mlflow.set_tag('entry_point', 'train_simple_model')
-        
-        df_feat = feature_engineering(df, LIST_FEATURES_TO_DUMMY)
-        
-        mlflow.log_params(
-            {
-                'n_estimators': 20,
-                'max_depath': 30,
-                "dummy_features": LIST_FEATURES_TO_DUMMY,
-                "nb_features": len(FEATURES),
-            }
-        )
-        git_commit = run.data.tags.get(mlflow_tags.MLFLOW_GIT_COMMIT)
-    
-        model = RandomForestRegressor(n_estimators=20, max_depth = 30)  
-        x_train, _, model = simple_training(df_feat, model, FEATURES, nb_week_prediction=1)
-        
-        mlflow.log_metric(key="mae_train_set", value=round(x_train.MAE.mean(),1))
-        mlflow.log_metric(key="mape_train_set", value=round(x_train.MAPE.mean(),1)*100)
-
-        mlflow.sklearn.log_model(
-            sk_model=model,
-            artifact_path='simple_model',
-        )
-       
-        logger.info(f'mlflow.pyfunc.log_model:\n{model}')
-            
-    return model #TODO use get_run mlflow
+    return model, n_models #TODO use get_run mlflow
 
 def predict(data_dir: str, 
-            model: BaseEstimator):
+            model: BaseEstimator, 
+            n_models:int=None):
     """ Make prediction based on model trained
     """
+    logger.info('Test set prediction in progress')
     mlflow_client = mlflow.tracking.MlflowClient()
 
     with mlflow.start_run(run_name='prediction') as run:
@@ -162,42 +153,83 @@ def predict(data_dir: str,
         
         try:
             preds = model.predict(None, df_feat.set_index('day_id')[FEATURES])
+            preds = pd.DataFrame(
+                {
+                    'y_pred_simple': preds['y_pred_simple'],
+                    'y_pred_min': preds[[f'y_pred_{i}' for i in range(1,n_models)]].min(axis=1),
+                    'y_pred_max': preds[[f'y_pred_{i}' for i in range(1,n_models)]].max(axis=1)
+                }
+            )
+            df_test = pd.concat([df_test.set_index('day_id'), preds],axis=1)
         except (TypeError, ValueError): 
-            preds = model.predict(df_feat.set_index('day_id')[FEATURES])
+            df_test.set_index('day_id')['y_simple_prediction'] = model.predict(df_feat.set_index('day_id')[FEATURES])
+         
+        mlflow_log_pandas(df_test, 'test_set', 'test_set.csv')
+
+    return 0
+
+
+# def predict(df): #add params
+#     """ TODO
+#     """
+#     mlflow_client = mlflow.tracking.MlflowClient()
+
+#     with mlflow.start_run(run_name='prediction') as run:
+#         logger.info(f"Start mlflow run - prediction - id = {run.info.run_id}")
+#         mlflow.set_tag('entry_point', 'prediction')  
+
+#         git_commit = run.data.tags.get(mlflow_tags.MLFLOW_GIT_COMMIT)
+
+#         train_run = get_run(
+#                 mlflow_client,
+#                 entry_point='validate_simple_model',
+#                 parameters={
+#                     'n_estimators': 20,
+#                     'max_depath': 30,
+#                     "dummy_features": LIST_FEATURES_TO_DUMMY,
+#                     "nb_features": len(FEATURES),
+#                 },
+#                 git_commit=git_commit
+#             )
+
+#         model = mlflow.sklearn.load_model(
+#             os.path.join(
+#                 train_run.info.artifact_uri,
+#                 'simple_model',
+#             )
+#         )
+
+#         df_test = extract_test_set_csv(data_dir)
+#         df_store = extract_stores_csv(data_dir)
+#         logger.info(f'shape of init test set {df_test.shape}')
+
+#         df = transform(df_test, df_store, is_train=False)
+#         df_feat = feature_engineering(df, list_features_to_dummy=LIST_FEATURES_TO_DUMMY)
         
-        try:
-            preds.to_csv('data/preprocessed/preds.csv')
-        except:
-            pd.DataFrame({'predictions':preds}).to_csv('data/preprocessed/preds.csv')
-        
-        mlflow.log_artifact('data/preprocessed/preds.csv')
-        mlflow.log_artifact(data_dir+'/test.csv')
+#         preds = model.predict(df_feat.set_index('day_id')[FEATURES])
+#         mlflow_log_pandas(preds, 'predictions', 'y_pred.csv')
 
-    return preds
-
-def prediction_based_on_log(df:pd.DataFrame, data_dir: str, logged_model: str):
-    """ generate prediction on a new set
-    ex. logged_model = './mlruns/0/bc5d7ba4f78145f9aac8e38ee4eade1a/artifacts/simple_model'
-    """
-    model = mlflow.pyfunc.load_model(logged_model)
-    df_store = extract_stores_csv(data_dir)
-    df_ = transform(df, df_store, is_train=False)
-    df_ = feature_engineering(df_, list_features_to_dummy=LIST_FEATURES_TO_DUMMY)
-
-    try:
-        preds = model.predict(None, df_.set_index('day_id')[FEATURES])
-        df = pd.concat([df.set_index('day_id'), preds],axis=1)
-    except (TypeError, ValueError): 
-        preds = model.predict(df_.set_index('day_id')[FEATURES])
-        df.sort_values('day_id')['y_pred_simple'] = preds
-    
-    return df
 
 def main():
-    df = etl(DATA_DIR_RAW)
-    model = train_simple_model(df)
-    #model = train_multimodel(df)
-    preds = predict(DATA_DIR_RAW, model=model)
+    df = etl(settings.DATA_DIR_RAW)
+    model = train_simple_model(df,
+                        list_features_to_dummy = LIST_FEATURES_TO_DUMMY,
+                        features = FEATURES,
+                        n_estimators = 20,
+                        max_depth = 30
+                        )
+
+    preds = predict(settings.DATA_DIR_RAW, model)
+
+    model = train_multi_model(df,
+                        list_features_to_dummy =  LIST_FEATURES_TO_DUMMY,
+                        features = FEATURES,     
+                        n_estimators = 20,
+                        max_depth = 30, 
+                        n_models = 3
+                        )
+                        
+    preds = predict(settings.DATA_DIR_RAW, model)
     return 0
 
 if __name__ == "__main__":

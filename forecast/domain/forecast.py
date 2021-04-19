@@ -77,7 +77,7 @@ def simple_training(x:pd.DataFrame,
 def cross_validate(df: pd.DataFrame, 
                     model: BaseEstimator,
                     features: list,
-                    target: str='target', 
+                    target: str='turnover', 
                     nb_week_prediction: int = 8,
                     n_fold:int=3):
 
@@ -105,6 +105,8 @@ def cross_validate(df: pd.DataFrame,
     cv = TimeSeriesSplit(n_fold, test_size=10059) # ~ size of test set
 
     for fold, (train_index, test_index) in enumerate(cv.split(df)):
+        logger.info(f'Fold {fold} -')
+
         x_fold_train, x_fold_test = df.iloc[train_index], df.iloc[test_index]
         model_fold = clone(model)
         
@@ -114,7 +116,6 @@ def cross_validate(df: pd.DataFrame,
                         model = model_fold, 
                         nb_week_prediction = nb_week_prediction)
 
-        logger.info(f'Fold {fold} -')
         logger.info(f"""Train shape, start/end date: [{x_fold_train.shape, 
                                                         str(x_fold_train.index.min()), 
                                                         str(x_fold_train.index.max())} 
@@ -143,6 +144,6 @@ def compute_mae_mape_per_points(x:pd.DataFrame,
     mean_mape = round(x.MAPE.mean(),1)
     mean_mae = round(x.MAE.mean(),1)
 
-    logger.info(f'Metrics computed: mape {mean_mape}, mae {mean_mae}')
+    logger.info(f'Metrics computed: mape {mean_mape*100}, mae {mean_mae}')
 
     return x

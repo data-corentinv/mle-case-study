@@ -26,10 +26,12 @@ st.header('I. Train set')
 
 start_date = st.sidebar.date_input('Start date', pd.to_datetime(df.day_id.min()))
 end_date = st.sidebar.date_input('End date', pd.to_datetime(df.day_id.max()))
+
 if start_date < end_date:
     st.write('• Start date: `%s`\n\n • End date:`%s`' % (start_date, end_date))
     tmp = df.query(f"""but_num_business_unit == {option}  \
                 and dpt_num_department == {option2}""")
+    tmp_ = tmp
     tmp = tmp[pd.to_datetime(tmp.day_id) >= pd.to_datetime(start_date)]
     tmp = tmp[pd.to_datetime(tmp.day_id) <= pd.to_datetime(end_date)]
 
@@ -38,6 +40,7 @@ else:
     tmp = df.query(f"""but_num_business_unit == {option}  \
                 and dpt_num_department == {option2} \
                 """)
+    tmp_ = tmp
 
 tmp.set_index('day_id', inplace=True)
 st.subheader('1. Table')
@@ -50,8 +53,15 @@ st.line_chart(tmp[['turnover', 'y_pred_simple']], height= 500)
 st.subheader('3. Chart line with confidance interval')
 st.line_chart(tmp[['turnover', 'y_pred_min', 'y_pred_max']], height= 500)
 
+tmp['MEAN_MAE'] = tmp_['MAE'].mean()
 st.subheader('3. Chart line of MAE')
-st.line_chart(tmp['MAE'], height= 500)
+st.line_chart(tmp[['MAE', 'MEAN_MAE']], height= 500)
+st.write('NB: MEAN_MAE is computed on all the history')
+
+tmp['MEAN_MAPE'] = tmp_['MAPE'].mean()
+st.subheader('4. Chart line of MAPE')
+st.line_chart(tmp[['MAPE', 'MEAN_MAPE']], height= 500)
+st.write('NB: MEAN_MAPE is computed on all the history')
 
 st.header('II. Test set')
 df_test = read_df_test(DATA_DIR_OUTPUT)
