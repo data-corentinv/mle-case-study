@@ -59,6 +59,7 @@ df.head(2)
 ```
 
 ```python
+# Missing values check
 df.isna().sum()
 ```
 

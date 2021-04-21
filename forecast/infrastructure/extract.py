@@ -1,3 +1,6 @@
+""" Infrastructure - connections to data (extract and load data)
+"""
+
 import pandas as pd
 
 import logging
@@ -5,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 def extract_turnover_history_csv(data_dir: str) -> pd.DataFrame:
     """
-    Load turnover history with information of stores for a given data source.
+    Load turnover history with information of stores for a given data source (train.csv)
 
     Parameters
     ----------
@@ -15,7 +18,7 @@ def extract_turnover_history_csv(data_dir: str) -> pd.DataFrame:
     Returns
     -------
     pd.DataFrame
-        Temporal slice of data.
+        Table of turnover history
     """
 
     dtypes = {'but_num_business_unit': 'int', 
@@ -35,6 +38,17 @@ def extract_turnover_history_csv(data_dir: str) -> pd.DataFrame:
 
 def extract_test_set_csv(data_dir:str) -> pd.DataFrame: 
     """
+    Load test set to make prediction (test.csv).
+
+    Parameters
+    ----------
+    data_dir : str
+        Data directory path.
+
+    Returns
+    -------
+    pd.DataFrame
+        Table of turnover history (store id, dept, turnover)
     """
   
     dtypes = {'but_num_business_unit': 'int', 
@@ -53,7 +67,7 @@ def extract_test_set_csv(data_dir:str) -> pd.DataFrame:
 
 def extract_stores_csv(data_dir: str) -> pd.DataFrame:
     """
-    Load store information for a given data source.
+    Load store information for a given data source (bu_feat.csv).
 
     Parameters
     ----------
@@ -63,7 +77,7 @@ def extract_stores_csv(data_dir: str) -> pd.DataFrame:
     Returns
     -------
     pd.DataFrame
-        Dataframe of stores
+        Dataframe containing information of stores (id, latitude, long, regions, zone)
     """
     dtypes = {  
             'but_num_business_unit': 'int', 

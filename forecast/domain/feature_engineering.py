@@ -1,6 +1,10 @@
+""" Domain - knowledge (feature eng)
+"""
+
 import pandas as pd
 import numpy as np
 import logging
+
 logger = logging.getLogger(__name__)
 
 def feature_engineering(df: pd.DataFrame, list_features_to_dummy:list) -> pd.DataFrame:
@@ -51,11 +55,13 @@ def get_dummies_given_a_list(df: pd.DataFrame,
     df: pd.DataFrame
         Dataframe with feature dummies
     """
+    logger.warning('All categories of dummy features have to be present \
+                in test set (replace in the future by onehotencoder)')
     df = pd.get_dummies(df, columns=list_features_to_dummy, drop_first=True)
     return df
 
 def new_feat_season(df: pd.DataFrame) -> pd.DataFrame:
-    """ #TODO create estimated season featured (1: hiver, 2 : printemps, 3: ete, 4: autonomne)
+    """ Create estimated season featured (1: hiver, 2 : printemps, 3: ete, 4: autonomne)
     
     Parameters
     ----------

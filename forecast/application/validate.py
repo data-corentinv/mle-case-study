@@ -1,3 +1,6 @@
+""" Application - main script with mlflow implementation (validate part)
+"""
+
 import datetime
 import os
 
@@ -7,10 +10,11 @@ from sklearn.base import BaseEstimator
 import matplotlib.pyplot as plt
 
 from forecast.domain.multimodel import MultiModel
-from forecast.domain import transform, feature_engineering
-from forecast.domain.forecast import simple_training, cross_validate
+from forecast.application import etl
+from forecast.domain import feature_engineering, simple_training, cross_validate
 from forecast.infrastructure import extract_turnover_history_csv, extract_stores_csv, extract_test_set_csv
 import forecast.settings as settings
+from forecast.settings import FEATURES, LIST_FEATURES_TO_DUMMY
 
 import mlflow
 from mlflow.utils import mlflow_tags
@@ -25,45 +29,6 @@ logging.getLogger('matplotlib.font_manager').disabled = True
 logger = logging.getLogger(__name__)
 
 import pdb
-
-FEATURES = ['weekofyear_cos_1', 'weekofyear_sin_1', 'x', 'y', 'z', 'dpt_num_department_88', 
-                'dpt_num_department_117', 'dpt_num_department_127', 'zod_idr_zone_dgr_3', 
-                'zod_idr_zone_dgr_4', 'zod_idr_zone_dgr_6', 'zod_idr_zone_dgr_10', 'zod_idr_zone_dgr_35', 
-                'zod_idr_zone_dgr_59', 'zod_idr_zone_dgr_72']
-
-LIST_FEATURES_TO_DUMMY = ['dpt_num_department',"zod_idr_zone_dgr"]
-
-def etl(raw_data_dir: str, preprocessed_data_dir: bool = None) -> pd.DataFrame:
-    """ Extract transform and load data. Extract historical (train.csv, test.csv)
-    and stores informations (bu_feat.csv)
-    TODO: Adapt function for testset
-
-    Parameters
-    ----------
-    raw_data_dir : str
-        Path of data directory containing train.csv, test.csv, bu_feat.csv
-    preprocessed_data_dir : str (default: None)
-        Path of data for saving results of etl (default value is None, no data saved)
-
-    Returns
-    -------
-    pd.DataFrame
-        Dataframe cleaned
-    """
-
-    # extract
-    df_turnover = extract_turnover_history_csv(raw_data_dir)
-    df_stores = extract_stores_csv(raw_data_dir)
-
-    # transform
-    df = transform(df_turnover, 
-                    df_stores)
-
-    # load
-    if preprocessed_data_dir:
-        logger.info('TODO: Data would be saved (not implemented)')
-
-    return df
 
 def validate_simple_model(df: pd.DataFrame, 
                         list_features_to_dummy: list,
@@ -97,7 +62,7 @@ def validate_simple_model(df: pd.DataFrame,
                 'max_depth': max_depth,
                 "dummy_features": list_features_to_dummy,
                 "nb_features": len(features), 
-                "validation_method": method
+                "method_validation": method
             }
         )
         git_commit = run.data.tags.get(mlflow_tags.MLFLOW_GIT_COMMIT)
@@ -108,7 +73,7 @@ def validate_simple_model(df: pd.DataFrame,
             logger.info('simple validation method choosen')
             x_train, x_test, model = simple_training(df_feat, model, features)
         else: 
-            logger.info('TimeSerieSplit validation method choosen (default 3 folds)')
+            logger.info(f'TimeSerieSplit validation method choosen ({n_fold} folds)')
             x_train, x_test, model = cross_validate(df_feat, model, features, n_fold=n_fold)
         
         mlflow.log_metric(key="mae_mean_test_set", value=round(x_test.MAE.mean(),1))
@@ -117,8 +82,7 @@ def validate_simple_model(df: pd.DataFrame,
         mlflow.log_metric(key="mape_mean_train_set", value=round(x_train.MAPE.mean(),1)*100)
 
         # log x_test
-        x_test.to_csv('data/preprocessed/x_test.csv')
-        mlflow.log_artifact('data/preprocessed/x_test.csv')
+        mlflow_log_pandas(x_test, "test_validation", "x_test.csv")
 
         # Plot results on test set
         tmp_plot = x_test[:100]
@@ -179,7 +143,7 @@ def validate_multi_model(df: pd.DataFrame,
             logger.info('simple validation method choosen')
             x_train, x_test, model = simple_training(df_feat, model, features)
         else: 
-            logger.info('TimeSerieSplit validation method choosen (default. 3 folds)')
+            logger.info(f'TimeSerieSplit validation method choosen ({n_fold} folds)')
             x_train, x_test, model = cross_validate(df_feat, model, features, n_fold=n_fold)
         
         x_train, x_test, model = simple_training(df_feat, model, features)
@@ -234,7 +198,10 @@ def validate_multi_model(df: pd.DataFrame,
     return 0 #TODO use get_run mlflow
 
 def main():
-    df = etl(settings.DATA_DIR_RAW)
+    df = etl(
+        settings.DATA_DIR_RAW,
+        settings.DATA_DIR_PREPROCESSED
+        )
     
     validate_simple_model(
                             df,
@@ -260,7 +227,7 @@ def main():
                             features = FEATURES,     
                             n_estimators = 20,
                             max_depth = 30,
-                            n_models = 10,
+                            n_models = 3,
                             method='timeseriesplit'
                         )
     return 0

@@ -27,12 +27,13 @@ pd.set_option('display.width', 500)
 pd.set_option('max_colwidth', 400)
 
 import matplotlib.pyplot as plt
+import seaborn as sns
 from folium import plugins
 import folium
 
 from forecast.application import etl
-from forecast.domain import feature_engineering
-from forecast.domain.transform import transform
+from forecast.domain import feature_engineering, transform
+from forecast.domain.utils_plot import plot_features_importance
 from forecast.domain.forecast  import simple_training, cross_validate, compute_mae_mape_per_points
 from forecast.infrastructure.extract import extract_test_set_csv, extract_stores_csv
 import forecast.settings as settings
@@ -62,12 +63,12 @@ df = etl(settings.DATA_DIR_RAW)
 ```
 
 ```python
-# Info cleaning made 
+# DATA CLEANING CHECK UP
 
-# Negative turnover
+# 1. Negative turnover
 print('Shape negative turnover dataframe', df[df.turnover < 0].turnover.shape)
 
-# Outliers
+# 2. Outlier detected
 df \
     .query(f"dpt_num_department == {88}") \
     .groupby(["weekofyear",'year'], as_index=False) \
@@ -80,9 +81,11 @@ df \
             title=f'Evolution of turnover for department {88} by year'
 )
 plt.grid(True)
-#plt.xlabel('Turnover')
-#plt.title(f'Evolution of turnover for department {88} by year')
 ```
+
+    -> Example of outlier detected before cleaning: 
+<img src="../images/outlier_detected.png" style="width: 500px;"/>
+
 
 # Feature engineering
 
@@ -91,7 +94,7 @@ plt.grid(True)
 ```
 
 ```python
-df_feat = feature_engineering(df, list_features_to_dummy=['dpt_num_department',"zod_idr_zone_dgr"])
+df_feat = feature_engineering(df, list_features_to_dummy=['dpt_num_department',"zod_idr_zone_dgr", "season"])
 ```
 
 ```python
@@ -101,7 +104,26 @@ df_feat.head(2)
 # Features selected for modeling
 
 ```python
-features = ['weekofyear_cos_1', 'weekofyear_sin_1', 'x', 'y', 'z', 'dpt_num_department_88', 'dpt_num_department_117', 'dpt_num_department_127', 'zod_idr_zone_dgr_3', 'zod_idr_zone_dgr_4', 'zod_idr_zone_dgr_6', 'zod_idr_zone_dgr_10', 'zod_idr_zone_dgr_35', 'zod_idr_zone_dgr_59', 'zod_idr_zone_dgr_72']
+f, ax = plt.subplots(figsize=(10, 6))
+sns.heatmap(
+    df_feat[
+        ['turnover', 'weekofyear_cos_1', 'weekofyear_sin_1', 'x', 'y', 'z', 
+         'dpt_num_department_88', 'dpt_num_department_117', 'dpt_num_department_127', 
+         'zod_idr_zone_dgr_3', 'zod_idr_zone_dgr_4', 'zod_idr_zone_dgr_6', 'zod_idr_zone_dgr_10', 
+         'zod_idr_zone_dgr_35', 'zod_idr_zone_dgr_59', 'zod_idr_zone_dgr_72', 
+         'season_2', 'season_3', 'season_4'
+        ]
+    ].corr()
+)
+ax.set_title('Correlation matrix (pearson method) for numerical or binary features')
+```
+
+```python
+# Selected features
+features = ['weekofyear_cos_1', 'weekofyear_sin_1', 'x', 'y', 'z', 'dpt_num_department_88', \
+            'dpt_num_department_117', 'dpt_num_department_127', 'zod_idr_zone_dgr_3', \
+            'zod_idr_zone_dgr_4', 'zod_idr_zone_dgr_6', 'zod_idr_zone_dgr_10', \
+            'zod_idr_zone_dgr_35', 'zod_idr_zone_dgr_59', 'zod_idr_zone_dgr_72']
 df_feat[features].head(2)
 ```
 
@@ -124,6 +146,11 @@ fig, ax = plt.subplots(figsize=(500,10))
 ax.plot(range(x_test.shape[0]), x_test[["turnover","y_pred_simple"]])
 plt.grid(True)
 plt.title('Evolution of turnover on validation set')
+```
+
+```python
+# Plot features importance
+plot_features_importance(x_train[features], model.feature_importances_, 10)
 ```
 
 # Simple model - TimeSerieSplit learning
@@ -210,7 +237,7 @@ final_output = pd.concat(
 
 ```python
 compute_mae_mape_per_points(final_output) \
-    .to_csv(settings.DATA_DIR_OUTPUT + '/train_predictions_v3.csv')
+    .to_csv(settings.DATA_DIR_OUTPUT + '/train_predictions.csv')
 ```
 
 # Test set - predictions
@@ -247,11 +274,11 @@ tmp_plot = final_output[:50]
 fig, ax = plt.subplots(figsize=(20,10))
 ax.plot(range(tmp_plot.shape[0]), tmp_plot["y_pred_simple"], label='simple_pred')
 ax.fill_between(range(tmp_plot.shape[0]), tmp_plot["y_pred_min"], tmp_plot["y_pred_max"], alpha=0.5)
-plt.title('Prediction on test set (50 end rows)')
+plt.title('Prediction on test set (50 latest rows)')
 plt.grid(True)
 plt.legend()
 ```
 
 ```python
-final_output.to_csv(settings.DATA_DIR_OUTPUT+'/test_predictions_v2.csv')
+final_output.to_csv(settings.DATA_DIR_OUTPUT+'/test_predictions.csv')
 ```
