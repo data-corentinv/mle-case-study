@@ -1,3 +1,6 @@
+""" Application - main script with mlflow implementation (predict part)
+"""
+
 import datetime
 import os
 
@@ -12,6 +15,7 @@ from forecast.domain.forecast import simple_training, compute_mae_mape_per_point
 from forecast.infrastructure import extract_turnover_history_csv, extract_stores_csv, extract_test_set_csv
 from forecast.application import etl
 import forecast.settings as settings
+from forecast.settings import FEATURES, LIST_FEATURES_TO_DUMMY
 
 import mlflow
 from mlflow.utils import mlflow_tags
@@ -26,13 +30,6 @@ logger = logging.getLogger(__name__)
 
 import pdb
 
-
-FEATURES = ['weekofyear_cos_1', 'weekofyear_sin_1', 'x', 'y', 'z', 'dpt_num_department_88', 
-                'dpt_num_department_117', 'dpt_num_department_127', 'zod_idr_zone_dgr_3', 
-                'zod_idr_zone_dgr_4', 'zod_idr_zone_dgr_6', 'zod_idr_zone_dgr_10', 'zod_idr_zone_dgr_35', 
-                'zod_idr_zone_dgr_59', 'zod_idr_zone_dgr_72']
-
-LIST_FEATURES_TO_DUMMY = ['dpt_num_department',"zod_idr_zone_dgr"]
 
 def train_simple_model(df: pd.DataFrame,
                         list_features_to_dummy: list,
@@ -133,6 +130,8 @@ def train_multi_model(df: pd.DataFrame,
     return model, n_models #TODO use get_run mlflow
 
 def predict(data_dir: str, 
+            list_features_to_dummy: list,
+            features: list,  
             model: BaseEstimator, 
             n_models:int=None):
     """ Make prediction based on model trained
@@ -144,15 +143,14 @@ def predict(data_dir: str,
         logger.info(f"Start mlflow run - prediction - id = {run.info.run_id}")
         mlflow.set_tag('entry_point', 'prediction')
         
+        df = etl(data_dir, is_train=False)
         df_test = extract_test_set_csv(data_dir)
-        df_store = extract_stores_csv(data_dir)
         logger.info(f'shape of init test set {df_test.shape}')
 
-        df = transform(df_test, df_store, is_train=False)
-        df_feat = feature_engineering(df, list_features_to_dummy=LIST_FEATURES_TO_DUMMY)
+        df_feat = feature_engineering(df, list_features_to_dummy=list_features_to_dummy)
         
         try:
-            preds = model.predict(None, df_feat.set_index('day_id')[FEATURES])
+            preds = model.predict(None, df_feat.set_index('day_id')[features])
             preds = pd.DataFrame(
                 {
                     'y_pred_simple': preds['y_pred_simple'],
@@ -160,76 +158,52 @@ def predict(data_dir: str,
                     'y_pred_max': preds[[f'y_pred_{i}' for i in range(1,n_models)]].max(axis=1)
                 }
             )
-            df_test = pd.concat([df_test.set_index('day_id'), preds],axis=1)
+            logger.info('concatenage init test set with prediction')
+            df_test = df_test.set_index('day_id')
+            df_test = pd.concat([df_test.sort_index(), preds],axis=1)
         except (TypeError, ValueError): 
-            df_test.set_index('day_id')['y_simple_prediction'] = model.predict(df_feat.set_index('day_id')[FEATURES])
+            logger.info('concatenage init test set with prediction')
+            y_simple_prediction = model.predict(df_feat.sort_values('day_id')[features])
+            df_test = df_test.sort_values('day_id') \
+                            .assign(y_simple_prediction=y_simple_prediction)
          
         mlflow_log_pandas(df_test, 'test_set', 'test_set.csv')
 
     return 0
 
-
-# def predict(df): #add params
-#     """ TODO
-#     """
-#     mlflow_client = mlflow.tracking.MlflowClient()
-
-#     with mlflow.start_run(run_name='prediction') as run:
-#         logger.info(f"Start mlflow run - prediction - id = {run.info.run_id}")
-#         mlflow.set_tag('entry_point', 'prediction')  
-
-#         git_commit = run.data.tags.get(mlflow_tags.MLFLOW_GIT_COMMIT)
-
-#         train_run = get_run(
-#                 mlflow_client,
-#                 entry_point='validate_simple_model',
-#                 parameters={
-#                     'n_estimators': 20,
-#                     'max_depath': 30,
-#                     "dummy_features": LIST_FEATURES_TO_DUMMY,
-#                     "nb_features": len(FEATURES),
-#                 },
-#                 git_commit=git_commit
-#             )
-
-#         model = mlflow.sklearn.load_model(
-#             os.path.join(
-#                 train_run.info.artifact_uri,
-#                 'simple_model',
-#             )
-#         )
-
-#         df_test = extract_test_set_csv(data_dir)
-#         df_store = extract_stores_csv(data_dir)
-#         logger.info(f'shape of init test set {df_test.shape}')
-
-#         df = transform(df_test, df_store, is_train=False)
-#         df_feat = feature_engineering(df, list_features_to_dummy=LIST_FEATURES_TO_DUMMY)
-        
-#         preds = model.predict(df_feat.set_index('day_id')[FEATURES])
-#         mlflow_log_pandas(preds, 'predictions', 'y_pred.csv')
-
-
 def main():
     df = etl(settings.DATA_DIR_RAW)
-    model = train_simple_model(df,
+    model = train_simple_model(
+                        df,
                         list_features_to_dummy = LIST_FEATURES_TO_DUMMY,
                         features = FEATURES,
                         n_estimators = 20,
                         max_depth = 30
                         )
 
-    preds = predict(settings.DATA_DIR_RAW, model)
+    preds = predict(
+                    settings.DATA_DIR_RAW, 
+                    list_features_to_dummy = LIST_FEATURES_TO_DUMMY,
+                    features = FEATURES,
+                    model = model
+                    )
 
-    model = train_multi_model(df,
+    model, n_models = train_multi_model(
+                        df,
                         list_features_to_dummy =  LIST_FEATURES_TO_DUMMY,
                         features = FEATURES,     
                         n_estimators = 20,
                         max_depth = 30, 
                         n_models = 3
                         )
-                        
-    preds = predict(settings.DATA_DIR_RAW, model)
+
+    preds = predict(
+                    settings.DATA_DIR_RAW, 
+                    list_features_to_dummy = LIST_FEATURES_TO_DUMMY,
+                    features = FEATURES,
+                    model= model, 
+                    n_models = n_models
+                    )
     return 0
 
 if __name__ == "__main__":

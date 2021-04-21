@@ -10,6 +10,7 @@ Welcome to forecast's documentation!
    :maxdepth: 2
    :caption: Contents:
 
+   readme.rst
    generated/forecast.rst
 
 

@@ -33,6 +33,10 @@ pipeline-validate:
 pipeline-predict:
 	python $(SOURCE_DIR)/application/predict.py
 
+pipeline:
+	python $(SOURCE_DIR)/application/validate.py
+	python $(SOURCE_DIR)/application/predict.py
+
 run-webapp: 
 	streamlit run $(SOURCE_DIR)/interface/app.py --theme.font serif
 
